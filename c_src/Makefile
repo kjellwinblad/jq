@@ -22,10 +22,10 @@ endif
 
 ifdef JQ_MEMSAN_DEBUG
 	MEMSAN_FLAGS := -fno-omit-frame-pointer -fsanitize=address
-	EXTRA_C_FLAGS := -fPIC -g -O0 $(MEMSAN_FLAGS) -I $(ERL_TOP)/erts/emulator/beam/ -I $(ERL_TOP)/erts/include/x86_64-pc-linux-gnu/
+	EXTRA_C_FLAGS := -fPIC -g -O1 $(MEMSAN_FLAGS) -I $(ERL_TOP)/erts/emulator/beam/ -I $(ERL_TOP)/erts/include/x86_64-pc-linux-gnu/
 	CC := clang
 else
-	EXTRA_C_FLAGS := -fPIC -O3
+	EXTRA_C_FLAGS := -fPIC -O1 -g 
 	MEMSAN_FLAGS := 
 endif
 
@@ -46,7 +46,7 @@ C_SRC_OUTPUT ?= $(PRIV_DIR)/$(PROJECT).so
 ifeq ($(UNAME_SYS), Darwin)
 	CC ?= cc
 	CFLAGS ?= $(EXTRA_C_FLAGS) -std=c99 -arch x86_64 -finline-functions -Wall -Wmissing-prototypes
-	CXXFLAGS ?= -O3 -arch x86_64 -finline-functions -Wall
+	CXXFLAGS ?= -arch x86_64 -finline-functions -Wall
 	LDFLAGS ?= -arch x86_64 -flat_namespace -undefined suppress
 else ifeq ($(UNAME_SYS), FreeBSD)
 	CC ?= cc
@@ -111,12 +111,15 @@ build_erl_jq: $(OBJECTS)
 $(JQSRC):
 	git clone -b jq-1.6-emqx --single-branch $(JQURL) $(JQSRC_DIR)
 
-$(LIBJQ_NAME): $(JQSRC)
+$(LIBJQ_NAME): $(JQSRC) jq_enif_patch/enif_jq_jv_alloc_replacement.c jq_enif_patch/jv_nomem_handler_code.h
 	#ls -lart .libs/ modules/oniguruma/src/.libs/
+	cp jq_enif_patch/enif_jq_jv_alloc_replacement.c jqc/src/jv_alloc.c && \
+	cp jq_enif_patch/jv_nomem_handler_code.h jqc/src/ && \
+	cp hashtable.h jqc/src/ && \
 	cd $(JQSRC_DIR) && \
 	git submodule update --init && \
 	export CC="$(CC)" && \
-	export CFLAGS="$(EXTRA_C_FLAGS)" && \
+	export CFLAGS="-I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) $(EXTRA_C_FLAGS)" && \
 	export LDFLAGS="$(MEMSAN_FLAGS)" && \
 	autoreconf -fi && \
 	./configure --with-oniguruma=builtin --prefix=$(LIBJQ_PREFIX) && \
