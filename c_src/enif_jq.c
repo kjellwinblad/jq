@@ -1,10 +1,114 @@
 #include "enif_jq.h"
 #include "jv.h"
+#include "stdbool.h"
+#include "lru.h"
+
+
+static ERL_NIF_TERM make_error_msg_bin(ErlNifEnv* env, const char* msg, size_t msg_size);
+
+static ErlNifTSDKey jq_state_lru_cache;
+
+typedef struct {
+    size_t hash;
+    char* string;
+    jq_state* state;
+} JQStateCacheEntry;
+
+// Hash function from here https://stackoverflow.com/a/7666577
+// with small modifications
+static size_t hash_str(char *str)
+{
+    size_t hash = 5381;
+    int c;
+
+    while ((c = *str++))
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+
+    return hash;
+}
+
+static void jqstate_cache_entry_init(JQStateCacheEntry* entry, char* string) {
+    entry->hash = hash_str(string);    
+    entry->string = string;
+}
+
+static bool jqstate_cache_entry_eq(JQStateCacheEntry* o1, JQStateCacheEntry* o2) {
+    return o1->hash == o2->hash && (strcmp(o1->string, o2->string) == 0); 
+}
+
+static size_t jqstate_cache_entry_hash(JQStateCacheEntry* o) {
+   return o->hash;
+}
+
+static void jqstate_cache_entry_destroy(JQStateCacheEntry* o) {
+   jq_teardown(&o->state); 
+   enif_free(o->string);
+}
+
+static bool jqstate_cache_entry_shall_eject(size_t current_size, JQStateCacheEntry* value) {
+    (void)value;
+    /* if (current_size > 2) { */
+    /*     printf("EJECTING OBJECT\n"); */
+    /* } */
+    return current_size > 2;
+}
+
+DECLARE_LRUCACHE_DS(JQStateCacheEntry, static, enif_alloc, enif_free, jqstate_cache_entry_eq, jqstate_cache_entry_hash, jqstate_cache_entry_destroy, jqstate_cache_entry_shall_eject)
 
 typedef struct {
     ErlNifEnv* env;
     ERL_NIF_TERM* error_msg_bin_ptr;
 } NifEnvAndErrBinPtr;
+
+static JQStateCacheEntry_lru * get_jqstate_cache() {
+    JQStateCacheEntry_lru * cache = enif_tsd_get(jq_state_lru_cache);
+    if (cache == NULL) {
+        cache = JQStateCacheEntry_lru_new();
+        enif_tsd_set(jq_state_lru_cache, cache);
+    }
+    return cache;
+}
+
+jq_state* get_jq_state(ErlNifEnv* env, ERL_NIF_TERM* error_msg_bin_ptr, int* ret, ErlNifBinary erl_jq_filter) {
+    // Make sure the JQ filter is \0 terminted
+    ERL_NIF_TERM compile_input;
+    memcpy(enif_make_new_binary(env, erl_jq_filter.size + 1, &compile_input), erl_jq_filter.data, erl_jq_filter.size);
+    enif_inspect_binary(env, compile_input, &erl_jq_filter);
+    erl_jq_filter.data[erl_jq_filter.size-1] = '\0';
+    // Check if there is already a jq filter in the LRU cache
+    JQStateCacheEntry_lru * cache = get_jqstate_cache();
+    JQStateCacheEntry new_entry;
+    jqstate_cache_entry_init(&new_entry, (char*)erl_jq_filter.data);
+    JQStateCacheEntry * cache_entry = JQStateCacheEntry_lru_get(cache, new_entry);
+    if (cache_entry != NULL) {
+        // printf("USING CACHED OBJECT\n");
+        return cache_entry->state;
+    }
+    // No entry in the cache so we have to create a new jq_state
+    jq_state *jq = NULL;
+    jq = jq_init();
+    if (jq == NULL) {
+        *ret = JQ_ERROR_SYSTEM;
+        const char* error_message = "jq_init: Could not initialize jq";
+        *error_msg_bin_ptr =
+            make_error_msg_bin(env, error_message, strlen(error_message));
+        return NULL;
+    }
+    if (!jq_compile(jq, (char*)erl_jq_filter.data)) {
+        *ret = JQ_ERROR_COMPILE;
+        const char* error_message = "Compilation of jq filter failed";
+        *error_msg_bin_ptr = make_error_msg_bin(env, error_message, strlen(error_message));
+        jq_teardown(&jq);
+        return NULL;
+    }
+    char * filter_program_string = enif_alloc(erl_jq_filter.size);
+    memcpy(filter_program_string, erl_jq_filter.data, erl_jq_filter.size);
+    new_entry.state = jq;
+    new_entry.string = filter_program_string;
+    JQStateCacheEntry_lru_add(cache, new_entry);
+    //printf("CREATED NEW OBJECT %s %lu\n", new_entry.string, new_entry.hash);
+    return jq;
+}
 
 // Forward declaration
 static ERL_NIF_TERM make_error_msg_bin(ErlNifEnv* env, const char* msg, size_t msg_size);
@@ -89,19 +193,14 @@ static ERL_NIF_TERM parse_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     int ret = JQ_ERROR_UNKNOWN;
     ERL_NIF_TERM ret_term;
     int dumpopts = 512; // JV_PRINT_SPACE1
-    jq = jq_init();
-    if (jq == NULL) {
-        ret = JQ_ERROR_SYSTEM;
-        const char* error_message = "jq_init: Could not initialize jq";
-        error_msg_bin =
-            make_error_msg_bin(env, error_message, strlen(error_message));
-        goto out;
-    }
-    NifEnvAndErrBinPtr env_and_msg_bin = {
-        .env = env,
-        .error_msg_bin_ptr = &error_msg_bin
-    };
-    jq_set_error_cb(jq, err_callback, &env_and_msg_bin);
+    /* jq = jq_init(); */
+    /* if (jq == NULL) { */
+    /*     ret = JQ_ERROR_SYSTEM; */
+    /*     const char* error_message = "jq_init: Could not initialize jq"; */
+    /*     error_msg_bin = */
+    /*         make_error_msg_bin(env, error_message, strlen(error_message)); */
+    /*     goto out; */
+    /* } */
 
     // --------------------------- read args -----------------------------------
     ErlNifBinary erl_jq_filter;
@@ -114,6 +213,17 @@ static ERL_NIF_TERM parse_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
             make_error_msg_bin(env, error_message, strlen(error_message));
         goto out;
     }
+    // --------- get jq state and compile filter program if not cached ---------
+    jq = get_jq_state(env, &error_msg_bin, &ret, erl_jq_filter);
+    if (jq == NULL) {
+        goto out;
+    }
+    // Set error callback here so that it get the right env
+    NifEnvAndErrBinPtr env_and_msg_bin = {
+        .env = env,
+        .error_msg_bin_ptr = &error_msg_bin
+    };
+    jq_set_error_cb(jq, err_callback, &env_and_msg_bin);
 
     // ------------------------- parse input json -----------------------------
     // It is reasonable to assume that jv_parse_sized would not require the 
@@ -144,16 +254,16 @@ static ERL_NIF_TERM parse_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     // Unfortunately, that forces us to create a new larger container that
     // we can put the program inside. We use an Erlang binary for the container
     // as small binaries can be efficiently allocated on the heap.
-    ERL_NIF_TERM compile_input;
-    memcpy(enif_make_new_binary(env, erl_jq_filter.size + 1, &compile_input), erl_jq_filter.data, erl_jq_filter.size);
-    enif_inspect_binary(env, compile_input, &erl_jq_filter);
-    erl_jq_filter.data[erl_jq_filter.size-1] = '\0';
-    if (!jq_compile(jq, (char*)erl_jq_filter.data)) {
-        ret = JQ_ERROR_COMPILE;
-        const char* error_message = "Compilation of jq filter failed";
-        error_msg_bin = make_error_msg_bin(env, error_message, strlen(error_message));
-        goto out;
-    }
+    /* ERL_NIF_TERM compile_input; */
+    /* memcpy(enif_make_new_binary(env, erl_jq_filter.size + 1, &compile_input), erl_jq_filter.data, erl_jq_filter.size); */
+    /* enif_inspect_binary(env, compile_input, &erl_jq_filter); */
+    /* erl_jq_filter.data[erl_jq_filter.size-1] = '\0'; */
+    /* if (!jq_compile(jq, (char*)erl_jq_filter.data)) { */
+    /*     ret = JQ_ERROR_COMPILE; */
+    /*     const char* error_message = "Compilation of jq filter failed"; */
+    /*     error_msg_bin = make_error_msg_bin(env, error_message, strlen(error_message)); */
+    /*     goto out; */
+    /* } */
 
     // ---------------------- process json text --------------------------------
     ERL_NIF_TERM ret_list = enif_make_list(env, 0);
@@ -178,7 +288,7 @@ out:// ----------------------------- release -----------------------------------
             break;
         }
     }
-    jq_teardown(&jq);
+    //  jq_teardown(&jq);
     // jq_next sometimes frees the input json and sometimes not so it is difficult
     // to keep track of how many copies (ref cnt inc) we have made.
     int ref_cnt = jv_get_refcnt(jv_json_text);
@@ -198,9 +308,14 @@ static ErlNifFunc nif_funcs[] = {
     {"parse", 2, parse_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND}
 };
 
-int upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, ERL_NIF_TERM load_info)
+static int load(ErlNifEnv* caller_env, void** priv_data, ERL_NIF_TERM load_info) {
+    int error = enif_tsd_key_create("jq_state_lru_cache", &jq_state_lru_cache);
+    return error;
+}
+
+static int upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, ERL_NIF_TERM load_info)
 {
 	return 0;
 }
 
-ERL_NIF_INIT(jq, nif_funcs, NULL, NULL, upgrade, NULL)
+ERL_NIF_INIT(jq, nif_funcs, load, NULL, upgrade, NULL)
