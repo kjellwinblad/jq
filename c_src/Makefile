@@ -49,17 +49,17 @@ C_SRC_OUTPUT ?= $(PRIV_DIR)/$(PROJECT).so
 
 ifeq ($(UNAME_SYS), Darwin)
 	CC ?= cc
-	CFLAGS ?= $(EXTRA_C_FLAGS) -std=c99 -arch x86_64 -finline-functions -Wall -Wno-missing-prototypes -Wno-unused-function
+	CFLAGS ?= $(EXTRA_C_FLAGS) -std=c11 -arch x86_64 -finline-functions -Wall -Wno-missing-prototypes -Wno-unused-function
 	CXXFLAGS ?= -O3 -arch x86_64 -finline-functions -Wall
 	LDFLAGS ?= -arch x86_64 -flat_namespace -undefined suppress
 else ifeq ($(UNAME_SYS), FreeBSD)
 	CC ?= cc
-	CFLAGS ?= $(EXTRA_C_FLAGS) -std=c99 -finline-functions -Wall -Wno-missing-prototypes -Wno-unused-function
+	CFLAGS ?= $(EXTRA_C_FLAGS) -std=c11 -finline-functions -Wall -Wno-missing-prototypes -Wno-unused-function
 	CXXFLAGS ?= $(EXTRA_C_FLAGS) -finline-functions -Wall
 	LDFLAGS += -Wl,-rpath,$$ORIGIN
 else ifeq ($(UNAME_SYS), Linux)
 	CC ?= cc
-	CFLAGS ?= $(EXTRA_C_FLAGS) -std=c99 -finline-functions -Wall -Wno-missing-prototypes -Wno-unused-function
+	CFLAGS ?= $(EXTRA_C_FLAGS) -std=c11 -finline-functions -Wall -Wno-missing-prototypes -Wno-unused-function
 	CXXFLAGS ?= $(EXTRA_C_FLAGS) -finline-functions -Wall
 	LDFLAGS += -Wl,-rpath,$$ORIGIN
 endif

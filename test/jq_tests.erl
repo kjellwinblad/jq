@@ -88,7 +88,7 @@ concurrent_queries_t_() ->
 concurrent_queries_test_() -> wrap_setup_cleanup(concurrent_queries_t_()).
 
 setup() ->
-    ?debugMsg("top setup").
+    ok.
 
 cleanup(_) ->
     true = code:delete(jq),

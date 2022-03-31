@@ -22,8 +22,7 @@ init() ->
             filename:join(Dir, ?LIBNAME)
     end,
     JQNifConfig =
-        #{nr_of_dirty_cpu_schedulers => erlang:system_info(dirty_cpu_schedulers),
-          filter_program_lru_cache_max_size => 10},
+        #{filter_program_lru_cache_max_size => 500},
     erlang:load_nif(SoName, JQNifConfig).
 
 not_loaded(Line) ->
