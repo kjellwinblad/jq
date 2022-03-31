@@ -71,7 +71,7 @@ static bool jqstate_cache_entry_shall_evict(size_t current_size, JQStateCacheEnt
     /* if (current_size > 2) { */
     /*     printf("EJECTING OBJECT\n"); */
     /* } */
-    printf("SHALL EVICT CALLED %ld\n", jq_state_cache_max_size);
+    //printf("SHALL EVICT CALLED %ld\n", jq_state_cache_max_size);
     return current_size > jq_state_cache_max_size;
 }
 
@@ -108,6 +108,7 @@ static JQStateCacheEntry_lru * get_jqstate_cache(ErlNifEnv* env) {
     if (cache == NULL) {
         // Create new cache
         cache = JQStateCacheEntry_lru_new();
+        printf("######################################################################################################################################################################\n");
         // Add new cache to array of caches so it can be freed on unload module
         enif_mutex_lock(data->lock);
         JQStateCacheEntry_lru_ptr_dynarr_push(&data->caches, cache);
@@ -405,7 +406,7 @@ static int load(ErlNifEnv* caller_env, void** priv_data, ERL_NIF_TERM load_info)
     /*     JQStateCacheEntry_lru_init(&data->thread_local_lru_caches[i].lru); */
     /* } */
     //int error = enif_tsd_key_create("jq_state_lru_cache_tsd_key", &jq_state_lru_cache_tsd_key);
-    printf("LOAD IS CALLED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    printf("LOAD IS CALLED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! %lu %lu\n", sizeof(module_private_data), sizeof(JQStateCacheEntry_lru));
     return !success;
 }
 
@@ -416,7 +417,7 @@ void unload(ErlNifEnv* caller_env, void* priv_data) {
     size_t nr_of_caches = JQStateCacheEntry_lru_ptr_dynarr_size(&data->caches);
     JQStateCacheEntry_lru_ptr* cache_array = JQStateCacheEntry_lru_ptr_dynarr_current_raw_array(&data->caches);
     for (int i = 0; i < nr_of_caches; i++) {
-        JQStateCacheEntry_lru_destroy(cache_array[i]);
+        JQStateCacheEntry_lru_free(cache_array[i]);
     }
     JQStateCacheEntry_lru_ptr_dynarr_destroy(&data->caches);
     tss_delete(data->thread_local_lru_cache);
