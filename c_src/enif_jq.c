@@ -1,12 +1,33 @@
 #include "enif_jq.h"
 #include "jv.h"
-#include "stdbool.h"
 #include "lru.h"
 
 
+#include <stdbool.h>
+#include <threads.h>
+// Thread local varialbes
+// ----------------------
+
+static _Thread_local long jq_state_cache_max_size = 100;
+
+// Forward declarations
+// --------------------
+
 static ERL_NIF_TERM make_error_msg_bin(ErlNifEnv* env, const char* msg, size_t msg_size);
 
-static ErlNifTSDKey jq_state_lru_cache;
+// Structs
+// -------
+typedef struct JQStateCacheEntry_lru* JQStateCacheEntry_lru_ptr;
+
+static bool JQStateCacheEntry_lru_ptr_eq(JQStateCacheEntry_lru_ptr* o1, JQStateCacheEntry_lru_ptr* o2) {
+    // not used
+    assert(0);
+    return 0; 
+}
+DECLARE_DYNARR_DS(JQStateCacheEntry_lru_ptr, static, enif_alloc, enif_free, JQStateCacheEntry_lru_ptr_eq, 1)
+
+// Helper functions for LRU Cache
+// ------------------------------
 
 typedef struct {
     size_t hash;
@@ -45,26 +66,56 @@ static void jqstate_cache_entry_destroy(JQStateCacheEntry* o) {
    enif_free(o->string);
 }
 
-static bool jqstate_cache_entry_shall_eject(size_t current_size, JQStateCacheEntry* value) {
+static bool jqstate_cache_entry_shall_evict(size_t current_size, JQStateCacheEntry* value) {
     (void)value;
     /* if (current_size > 2) { */
     /*     printf("EJECTING OBJECT\n"); */
     /* } */
-    return current_size > 2;
+    printf("SHALL EVICT CALLED %ld\n", jq_state_cache_max_size);
+    return current_size > jq_state_cache_max_size;
 }
 
-DECLARE_LRUCACHE_DS(JQStateCacheEntry, static, enif_alloc, enif_free, jqstate_cache_entry_eq, jqstate_cache_entry_hash, jqstate_cache_entry_destroy, jqstate_cache_entry_shall_eject)
+DECLARE_LRUCACHE_DS(JQStateCacheEntry, static, enif_alloc, enif_free, jqstate_cache_entry_eq, jqstate_cache_entry_hash, jqstate_cache_entry_destroy, jqstate_cache_entry_shall_evict)
+
+#define CACHE_LINE_PAD_SIZE 128
+
+typedef union {
+    JQStateCacheEntry_lru lru;
+    char pad[sizeof(JQStateCacheEntry_lru) + CACHE_LINE_PAD_SIZE];
+} CachePaddedJQStateCacheEntry_lru;
+
+// Data that is private to this version of the module
+typedef struct {
+    size_t lru_cache_max_size;
+    tss_t thread_local_lru_cache;
+    JQStateCacheEntry_lru_ptr_dynarr caches;
+    ErlNifMutex * lock;
+    // CachePaddedJQStateCacheEntry_lru thread_local_lru_caches[];
+} module_private_data;
 
 typedef struct {
     ErlNifEnv* env;
     ERL_NIF_TERM* error_msg_bin_ptr;
 } NifEnvAndErrBinPtr;
 
-static JQStateCacheEntry_lru * get_jqstate_cache() {
-    JQStateCacheEntry_lru * cache = enif_tsd_get(jq_state_lru_cache);
+
+// Helper functions
+// ----------------
+
+static JQStateCacheEntry_lru * get_jqstate_cache(ErlNifEnv* env) {
+    module_private_data* data = enif_priv_data(env);
+    JQStateCacheEntry_lru * cache = tss_get(data->thread_local_lru_cache);
     if (cache == NULL) {
+        // Create new cache
         cache = JQStateCacheEntry_lru_new();
-        enif_tsd_set(jq_state_lru_cache, cache);
+        // Add new cache to array of caches so it can be freed on unload module
+        enif_mutex_lock(data->lock);
+        JQStateCacheEntry_lru_ptr_dynarr_push(&data->caches, cache);
+        enif_mutex_unlock(data->lock);
+        // Store the cache in the thread local storage for this thread
+        tss_set(data->thread_local_lru_cache, cache);
+        // Set the max size so it can be seen from jqstate_cache_entry_shall_evict
+        jq_state_cache_max_size = data->lru_cache_max_size;
     }
     return cache;
 }
@@ -76,7 +127,7 @@ jq_state* get_jq_state(ErlNifEnv* env, ERL_NIF_TERM* error_msg_bin_ptr, int* ret
     enif_inspect_binary(env, compile_input, &erl_jq_filter);
     erl_jq_filter.data[erl_jq_filter.size-1] = '\0';
     // Check if there is already a jq filter in the LRU cache
-    JQStateCacheEntry_lru * cache = get_jqstate_cache();
+    JQStateCacheEntry_lru * cache = get_jqstate_cache(env);
     JQStateCacheEntry new_entry;
     jqstate_cache_entry_init(&new_entry, (char*)erl_jq_filter.data);
     JQStateCacheEntry * cache_entry = JQStateCacheEntry_lru_get(cache, new_entry);
@@ -308,14 +359,75 @@ static ErlNifFunc nif_funcs[] = {
     {"parse", 2, parse_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND}
 };
 
+static int get_int_config(ErlNifEnv* caller_env, ERL_NIF_TERM load_info, char* property_name, int* res_wb) {
+    ERL_NIF_TERM property_atom = enif_make_atom(
+            caller_env,
+            property_name);
+    ERL_NIF_TERM property_term; 
+    if ( ! enif_get_map_value(
+            caller_env,
+            load_info,
+            property_atom,
+            &property_term)) {
+        // Incorrect load info
+        printf("LOOKUP ATOM\n");
+        return 1;
+    }
+    if ( ! enif_get_int(
+               caller_env,
+               property_term,
+               res_wb)) {
+        // Incorrect load info
+        printf("TERM TO INT\n");
+        return 1;
+    }
+    return 0;
+}
+
 static int load(ErlNifEnv* caller_env, void** priv_data, ERL_NIF_TERM load_info) {
-    int error = enif_tsd_key_create("jq_state_lru_cache", &jq_state_lru_cache);
-    return error;
+    /* int nr_of_dirty_cpu_schedulers; */
+    /* if ( ! get_int_config(caller_env, load_info, "nr_of_dirty_cpu_schedulers", &nr_of_dirty_cpu_schedulers) ) { */
+    /*     return 1; */
+    /* } */
+    int filter_program_lru_cache_max_size;
+    if ( get_int_config(caller_env, load_info, "filter_program_lru_cache_max_size", &filter_program_lru_cache_max_size) ) {
+        printf("Max size\n");
+        return 1;
+    }
+    module_private_data* data = enif_alloc(sizeof(module_private_data));
+    data->lru_cache_max_size = filter_program_lru_cache_max_size;
+    JQStateCacheEntry_lru_ptr_dynarr_init(&data->caches);
+    int success = thrd_success == tss_create(&data->thread_local_lru_cache, NULL);
+    data->lock = enif_mutex_create("jq.module_private_data_v0");
+    *priv_data = data;
+    //data->nr_of_caches = nr_of_dirty_cpu_schedulers;
+    /* for (int i = 0; i < nr_of_dirty_cpu_schedulers; i++) { */
+    /*     JQStateCacheEntry_lru_init(&data->thread_local_lru_caches[i].lru); */
+    /* } */
+    //int error = enif_tsd_key_create("jq_state_lru_cache_tsd_key", &jq_state_lru_cache_tsd_key);
+    printf("LOAD IS CALLED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    return !success;
+}
+
+void unload(ErlNifEnv* caller_env, void* priv_data) {
+    printf("UNLOAD IS CALLED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    //enif_tsd_key_destroy(jq_state_lru_cache_tsd_key);
+    module_private_data* data = priv_data; 
+    size_t nr_of_caches = JQStateCacheEntry_lru_ptr_dynarr_size(&data->caches);
+    JQStateCacheEntry_lru_ptr* cache_array = JQStateCacheEntry_lru_ptr_dynarr_current_raw_array(&data->caches);
+    for (int i = 0; i < nr_of_caches; i++) {
+        JQStateCacheEntry_lru_destroy(cache_array[i]);
+    }
+    JQStateCacheEntry_lru_ptr_dynarr_destroy(&data->caches);
+    tss_delete(data->thread_local_lru_cache);
+    enif_mutex_destroy(data->lock);
+    enif_free(data);
 }
 
 static int upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, ERL_NIF_TERM load_info)
 {
+    printf("UPGRADE IS CALLED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 	return 0;
 }
 
-ERL_NIF_INIT(jq, nif_funcs, load, NULL, upgrade, NULL)
+ERL_NIF_INIT(jq, nif_funcs, load, NULL, upgrade, unload)
