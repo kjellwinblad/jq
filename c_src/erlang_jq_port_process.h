@@ -63,6 +63,7 @@ int erlang_jq_port_process_json(
 
 
 void erlang_jq_port_process_init();
+void erlang_jq_port_process_destroy();
 
 
 

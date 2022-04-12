@@ -12,28 +12,29 @@ change_get_cache_size_t() ->
     [ ?_assertMatch(ok, jq:set_filter_program_lru_cache_max_size(42)),
       ?_assertMatch(42, jq:get_filter_program_lru_cache_max_size())
     ].
-change_get_cache_size_test_() -> wrap_setup_cleanup(change_get_cache_size_t()).
+% change_get_cache_size_test_() -> wrap_setup_cleanup(change_get_cache_size_t()).
 
 empty_input_t_() ->
-    [ ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"">>))
+    [
+     ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"">>))
     , ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<" ">>))
     , ?_assertMatch({ok,[<<"{}">>]}, jq:parse(<<"">>, <<"{}">>))
     , ?_assertMatch({ok,[<<"{}">>]}, jq:parse(<<" ">>, <<"{}">>))
     ].
-empty_input_test_() -> wrap_setup_cleanup(empty_input_t_()).
+% empty_input_test_() -> wrap_setup_cleanup(empty_input_t_()).
 
 parse_error_t_() ->
     [ ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"{\"b\": }">>))
     , ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"{\"b\"- 2}">>))
     , ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"{\"b\"- 2}">>))
     ].
-parse_error_test_() -> wrap_setup_cleanup(parse_error_t_()).
+% parse_error_test_() -> wrap_setup_cleanup(parse_error_t_()).
 
 process_error_t_() ->
     [ ?_assertMatch({error, {jq_err_process, _}}, jq:parse(<<".[1]">>, <<"{}">>))
     , ?_assertMatch({error, {jq_err_process, _}}, jq:parse(<<".a">>, <<"[1,2]">>))
     ].
-process_error_test_() -> wrap_setup_cleanup(process_error_t_()).
+% process_error_test_() -> wrap_setup_cleanup(process_error_t_()).
 
 object_identifier_index_t_() ->
     [ ?_assertEqual({ok,[<<"{\"b\":2}">>]}, jq:parse(<<".">>, <<"{\"b\": 2}">>))
@@ -41,12 +42,12 @@ object_identifier_index_t_() ->
     , ?_assertEqual({ok,[<<"2">>]}, jq:parse(<<".b">>, <<"{\"b\": 2}">>))
     , ?_assertEqual({ok,[<<"2">>]}, jq:parse(<<".a.b">>, <<"{\"a\":{\"b\": 2}}">>))
     ].
-object_identifier_index_test_() -> wrap_setup_cleanup(object_identifier_index_t_()).
+% object_identifier_index_test_() -> wrap_setup_cleanup(object_identifier_index_t_()).
 
 array_index_t_() ->
     [ ?_assertEqual({ok,[<<"1">>,<<"2">>,<<"3">>]}, jq:parse(<<".b|.[]">>, <<"{\"b\": [1,2,3]}">>))
     ].
-array_index_test_() -> wrap_setup_cleanup(array_index_t_()).
+% array_index_test_() -> wrap_setup_cleanup(array_index_t_()).
 
 test_prog(ExpectedResStr, FilterProgStr, InputStr) ->
     ExpectedResBin = erlang:list_to_binary(ExpectedResStr),
@@ -109,18 +110,21 @@ advanced_filter_programs_t() ->
        ".[1]",
        "[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]")
     ].
-advanced_filter_programs_testA_() ->
-    wrap_setup_cleanup(advanced_filter_programs_t()).
+% advanced_filter_programs_test_() ->
+%     wrap_setup_cleanup(advanced_filter_programs_t()).
 
 get_tests_cases() ->
     [ erlang:element(2, Test) ||
       Test <-
-      lists:flatten([empty_input_t_(), 
+      lists:flatten([empty_input_t_()
+                     , 
                      parse_error_t_(),
                      process_error_t_(),
                      object_identifier_index_t_(),
                      array_index_t_(),
-                     advanced_filter_programs_t()])].
+                     advanced_filter_programs_t()
+                    ])
+    ].
 
 repeat_tests(Parent, ShouldStop, [], AllTestFuns, Cnt) ->
     case counters:get(ShouldStop, 1) of
@@ -137,8 +141,8 @@ concurrent_queries_test(NrOfTestProcesses, PrintThroughput, CacheSize, TestTimeM
     ShouldStop = counters:new(1, []),
     TestCases = get_tests_cases(), 
     Self = erlang:self(),
-    OldCacheSize = jq:get_filter_program_lru_cache_max_size(),
-    ok = jq:set_filter_program_lru_cache_max_size(CacheSize),
+    % OldCacheSize = jq:get_filter_program_lru_cache_max_size(),
+    % ok = jq:set_filter_program_lru_cache_max_size(CacheSize),
     TestRunner = fun() ->
                     repeat_tests(Self, ShouldStop, TestCases, TestCases, 0)
                  end,
@@ -157,7 +161,7 @@ concurrent_queries_test(NrOfTestProcesses, PrintThroughput, CacheSize, TestTimeM
                             CacheSize});
         false -> ok
     end,
-    ok = jq:set_filter_program_lru_cache_max_size(OldCacheSize),
+    % ok = jq:set_filter_program_lru_cache_max_size(OldCacheSize),
     ok.
 
 qubes_helper(0, SoFar) ->
@@ -173,20 +177,23 @@ concurrent_queries_t_() ->
              NrOfScheds = erlang:system_info(schedulers),
              Qubes = qubes(NrOfScheds),
              erlang:display_nl(),
-             [(ok = concurrent_queries_test(NrOfTestProcess, true, 500, 500))
-              || NrOfTestProcess <- Qubes],
-             ok = concurrent_queries_test(NrOfScheds, false, 0, 100),
-             ok = concurrent_queries_test(NrOfScheds, false, 1, 100),
-             ok = concurrent_queries_test(NrOfScheds, false, 3, 100),
-             ok = concurrent_queries_test(NrOfScheds, false, 10, 100),
-             ok = concurrent_queries_test(NrOfScheds, false, 2, 100),
+             [(ok = concurrent_queries_test(NrOfTestProcess, true, 500, 5000))
+              || NrOfTestProcess <- [1]],
+             % ok = concurrent_queries_test(NrOfScheds, false, 0, 100),
+             % ok = concurrent_queries_test(NrOfScheds, false, 1, 100),
+             % ok = concurrent_queries_test(NrOfScheds, false, 3, 100),
+             % ok = concurrent_queries_test(NrOfScheds, false, 10, 100),
+             % ok = concurrent_queries_test(NrOfScheds, false, 2, 100),
+             jq_port:stop(),
              ok
      end}.
-concurrent_queries_testA_() -> wrap_setup_cleanup(concurrent_queries_t_()).
+concurrent_queries_test_() -> wrap_setup_cleanup(concurrent_queries_t_()).
 
 setup() ->
+    jq_port:start(""),
     ok.
 
 cleanup(_) ->
+    jq_port:stop(),
     true = code:delete(jq),
     true = code:soft_purge(jq).

@@ -13,12 +13,14 @@ int read_exact(byte *buf, int len)
 
   do {
       if ((i = read(0, buf+got, len-got)) <= 0) {
-          fprintf(log_file, "HMM CONNECTION CLOSED? %d\n", i);
+          /* fprintf(log_file, "HMM CONNECTION CLOSED? %d\n", i); */
           return i;
       }
     got += i;
   } while (got<len);
-
+    /* for (i = 0; i < len; i++) { */
+    /*     fputc((char)buf[i], log_file); */
+    /* } */
   return len;
 }
 
@@ -74,14 +76,16 @@ int write_cmd(byte *buf, size_t len)
 static int handle_process_json() {
      byte * jq_program = read_cmd();
      if (jq_program == NULL) {
+         //fprintf(stderr, "HERE\n");
         return 0;
      }
      byte * json_data = read_cmd();
      if (json_data == NULL) {
+         //fprintf(stderr, "HERE2\n");
         return 0;
      }
-    fprintf(log_file, "%s\n", jq_program);
-    fprintf(log_file, "%s\n", json_data);
+    /* fprintf(log_file, "%s\n", jq_program); */
+    /* fprintf(log_file, "%s\n", json_data); */
     PortString_dynarr result_strings;
     PortString_dynarr_init(&result_strings);
     char* error_msg = NULL;
@@ -93,10 +97,11 @@ static int handle_process_json() {
             &result_strings,
             &error_msg);
     if (res == JQ_OK) {
+        /* fprintf(log_file, "RESULT: %s\n", PortString_dynarr_item_at(&result_strings, 0).string); */
         
-        fprintf(log_file, "WRITTING OK!!\n");
+        /* fprintf(log_file, "WRITTING OK!!\n"); */
         int bytes_written = write_cmd((byte*)err_tags[JQ_OK], strlen(err_tags[JQ_OK]));
-        fprintf(log_file, "WROTE %d BYTES for the OK message\n", bytes_written);
+        /* fprintf(log_file, "WROTE %d BYTES for the OK message\n", bytes_written); */
         size_t nr_of_result_objects = PortString_dynarr_size(&result_strings);
         char buf[64];
         sprintf(buf, "%lu", nr_of_result_objects);
@@ -109,47 +114,42 @@ static int handle_process_json() {
         }
     } else {
         // Error message
-        fprintf(log_file, "WRITTING ERROR RESPONESE!!\n");
+        /* fprintf(log_file, "WRITTING ERROR RESPONESE!!\n"); */
+        int bytes_written = 0;
         const char* error_str = "error";
-        write_cmd((byte*)error_str, strlen(error_str));
-        write_cmd((byte*)err_tags[res], strlen(err_tags[res]));
-        write_cmd((byte*)error_msg, strlen(error_msg));
-
+        bytes_written = write_cmd((byte*)error_str, strlen(error_str));
+        /* fprintf(log_file, "WROTE %d %s\n", bytes_written, error_str); */
+        bytes_written = write_cmd((byte*)err_tags[res], strlen(err_tags[res]));
+        /* fprintf(log_file, "WROTE %d %s\n", bytes_written, err_tags[res]); */
+        bytes_written = write_cmd((byte*)error_msg, strlen(error_msg));
+        /* fprintf(log_file, "WROTE %d %s\n", bytes_written, error_msg); */
+        free(error_msg);
     }
-    fprintf(log_file, "RESULT: %s\n", PortString_dynarr_item_at(&result_strings, 0).string);
+    free(jq_program);
+    free(json_data);
     return 1;
 }
 
 int main() {
-erlang_jq_port_process_init();
-  byte buf[100];
-  log_file = fopen("./test.txt", "w+");
-  while (1) {
-      byte * command = read_cmd();
-      if (command == NULL) {
-        return 1;
-      }
-      if (strcmp((char*)command, "process_json") == 0) {
+    erlang_jq_port_process_init();
+    log_file = fopen("./test.txt", "wb");
+    while (1) {
+        byte * command = read_cmd();
+        if (command == NULL) {
+            return 1;
+        }
+        if (strcmp((char*)command, "process_json") == 0) {
             free(command);
             if(!handle_process_json()) {
                 return 1;
             }
-      } else {
-        // Unknown command
-          return 1;
-      }
-      sprintf((char*)buf, "ok");
-      write_exact(buf, strlen((char*)buf));
-    /* fn = buf[0]; */
-    /* arg = buf[1]; */
-    
-    /* if (fn == 1) { */
-    /*   res = foo(arg); */
-    /* } else if (fn == 2) { */
-    /*   res = bar(arg); */
-    /* } */
-
-    /* buf[0] = res; */
-    /* write_cmd(buf, 1); */
-  }
+        } else {
+            // Unknown command
+            //fprintf(stderr, "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n");
+            fclose(log_file);
+            free(command);
+            erlang_jq_port_process_destroy();
+            return 1;
+        }
+    }
 }

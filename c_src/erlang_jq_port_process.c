@@ -96,6 +96,7 @@ static size_t jqstate_cache_entry_hash(JQStateCacheEntry* o) {
 }
 
 static void jqstate_cache_entry_destroy(JQStateCacheEntry* o) {
+    //fprintf(stderr, "TEARDOWN\n");
    jq_teardown(&o->state); 
    free(o->string);
 }
@@ -149,8 +150,12 @@ static module_private_data data;
 void erlang_jq_port_process_init() {
     data.version = 1;
     data.nr_of_loads_before = 0;
-    data.lru_cache_max_size = 100;
+    data.lru_cache_max_size = 500;
     JQStateCacheEntry_lru_init(&data.cache);
+}
+
+void erlang_jq_port_process_destroy() {
+    JQStateCacheEntry_lru_destroy(&data.cache);
 }
 
 // This function is used to decide if the least recently used
@@ -267,7 +272,7 @@ int erlang_jq_port_process_json(
         char** error_msg_wb) {
     
     int ret = JQ_OK;
-    int remove_jq_object;
+    int remove_jq_object = 0;
     jq_state * jq = get_jq_state(&ret, error_msg_wb, erl_jq_filter, &remove_jq_object);
     if (jq == NULL) {
         return ret;
@@ -291,6 +296,7 @@ int erlang_jq_port_process_json(
         memcpy(*error_msg_wb,
                 jv_string_value(json_jv),
                 error_message_len -1);
+        jv_free(json_jv);
         (*error_msg_wb)[error_message_len - 1] = '\0';
         if (remove_jq_object) {
             jq_teardown(&jq);
