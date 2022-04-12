@@ -109,7 +109,7 @@ advanced_filter_programs_t() ->
        ".[1]",
        "[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]")
     ].
-advanced_filter_programs_test_() ->
+advanced_filter_programs_testA_() ->
     wrap_setup_cleanup(advanced_filter_programs_t()).
 
 get_tests_cases() ->
@@ -182,7 +182,7 @@ concurrent_queries_t_() ->
              ok = concurrent_queries_test(NrOfScheds, false, 2, 100),
              ok
      end}.
-concurrent_queries_test_() -> wrap_setup_cleanup(concurrent_queries_t_()).
+concurrent_queries_testA_() -> wrap_setup_cleanup(concurrent_queries_t_()).
 
 setup() ->
     ok.

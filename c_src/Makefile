@@ -90,8 +90,11 @@ cpp_verbose = $(cpp_verbose_$(V))
 link_verbose_0 = @echo " LD    " $(@F);
 link_verbose = $(link_verbose_$(V))
 
-SOURCES := $(shell find $(C_SRC_DIR) -maxdepth 1 -type f \( -name "*.c" -o -name "*.C" -o -name "*.cc" -o -name "*.cpp" \))
+SOURCES := enif_jq.c
 OBJECTS = $(addsuffix .o, $(basename $(SOURCES)))
+
+PORT_SOURCES := erlang_jq_port.c erlang_jq_port_process.c
+PORT_OBJECTS = $(addsuffix .o, $(basename $(PORT_SOURCES)))
 
 COMPILE_C = $(c_verbose) $(CC) $(CFLAGS) $(CPPFLAGS) -c
 COMPILE_CPP = $(cpp_verbose) $(CXX) $(CXXFLAGS) $(CPPFLAGS) -c
@@ -109,9 +112,13 @@ else
 $(C_SRC_OUTPUT): build_erl_jq
 endif
 
-build_erl_jq: $(OBJECTS)
+build_erl_jq: $(OBJECTS) build_erl_port_jq
 	@mkdir -p $(BASEDIR)/priv/
 	$(link_verbose) $(CC) $(OBJECTS) $(LDFLAGS) $(LDLIBS) -o $(C_SRC_OUTPUT)
+
+build_erl_port_jq: $(PORT_OBJECTS)
+	@mkdir -p $(BASEDIR)/priv/
+	gcc $(PORT_OBJECTS) -lm -L $(EXT_LIBS) -l:libjq.a -l:libonig.a -o $(BASEDIR)/priv/erlang_jq_port
 
 %.o: %.c $(LIBJQ_NAME) $(JQERLMODSRC) $(RDSSRC)
 	$(COMPILE_C) $(OUTPUT_OPTION) $<
