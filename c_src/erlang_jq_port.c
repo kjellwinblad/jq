@@ -2,55 +2,56 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include "erlang_jq_port_process.h"
 
 typedef unsigned char byte;
+#define PACKET_SIZE_LEN 4
 
-FILE *log_file;
-int read_exact(byte *buf, int len)
-{
-  int i, got = 0;
+static bool record_input = false;
+static FILE* record_input_file;
 
-  do {
-      if ((i = read(0, buf+got, len-got)) <= 0) {
-          /* fprintf(log_file, "HMM CONNECTION CLOSED? %d\n", i); */
-          return i;
-      }
-    got += i;
-  } while (got<len);
-    /* for (i = 0; i < len; i++) { */
-    /*     fputc((char)buf[i], log_file); */
-    /* } */
-  return len;
+static ssize_t read_exact(byte *buf, size_t len) {
+    ssize_t i;
+    size_t got = 0;
+    do {
+        if ((i = read(0, buf + got, len - got)) <= 0) {
+            return i;
+        }
+        got += i;
+    } while (got < len);
+    if (record_input) {
+        for (size_t i = 0; i < len; i++) {
+            fputc(buf[i], record_input_file); 
+        }
+    }
+    return len;
 }
 
-int write_exact(byte *buf, int len)
-{
-  int i, wrote = 0;
+static ssize_t write_exact(byte *buf, size_t len) {
+    ssize_t i;
+    size_t wrote = 0;
 
-  do {
-    if ((i = write(1, buf+wrote, len-wrote)) <= 0)
-      return i;
-    wrote += i;
-  } while (wrote<len);
+    do {
+        if ((i = write(1, buf+wrote, len-wrote)) <= 0)
+            return i;
+        wrote += i;
+    } while (wrote<len);
 
-  return len;
+    return len;
 }
 
 typedef unsigned char byte;
 
-byte* read_cmd()
-{
-#define SIZE_LEN 4
-    // TODO: change len to fixed size type
-    size_t len = 0;
-    byte buf[SIZE_LEN]; 
-    if ((len = read_exact(buf, SIZE_LEN)) != SIZE_LEN) {
+static byte* read_packet() {
+    uint64_t len = 0;
+    byte buf[PACKET_SIZE_LEN]; 
+    if ((len = read_exact(buf, PACKET_SIZE_LEN)) != PACKET_SIZE_LEN) {
         return NULL;
     }
     len = 0;
-    for (int i = (SIZE_LEN-1); i >= 0; i--) {
-        size_t addad_byte = ((size_t)buf[SIZE_LEN - (i+1)] << (i*sizeof(byte)));
+    for (int i = (PACKET_SIZE_LEN-1); i >= 0; i--) {
+        size_t addad_byte = ((size_t)buf[PACKET_SIZE_LEN - (i+1)] << (i*sizeof(byte)));
         len = len | addad_byte;
     }
     byte* command_content = malloc(len);
@@ -61,31 +62,27 @@ byte* read_cmd()
     return command_content;
 }
 
-int write_cmd(byte *buf, size_t len)
-{
-  byte li;
+static int write_cmd(byte *buf, size_t len) {
+    byte li;
 
-  for (int i = 0; i < SIZE_LEN; i++) {
-      li = (len >> (8 * (SIZE_LEN - (i+1)))) & 0xff;
-      write_exact(&li, 1);
-  }
+    for (int i = 0; i < PACKET_SIZE_LEN; i++) {
+        li = (len >> (8 * (PACKET_SIZE_LEN - (i+1)))) & 0xff;
+        write_exact(&li, 1);
+    }
 
-  return write_exact(buf, len);
+    return write_exact(buf, len);
 }
 
-static int handle_process_json() {
-     byte * jq_program = read_cmd();
-     if (jq_program == NULL) {
-         //fprintf(stderr, "HERE\n");
-        return 0;
-     }
-     byte * json_data = read_cmd();
-     if (json_data == NULL) {
-         //fprintf(stderr, "HERE2\n");
-        return 0;
-     }
-    /* fprintf(log_file, "%s\n", jq_program); */
-    /* fprintf(log_file, "%s\n", json_data); */
+static bool handle_process_json() {
+    byte * jq_program = read_packet();
+    if (jq_program == NULL) {
+        return false;
+    }
+    byte * json_data = read_packet();
+    if (json_data == NULL) {
+        free(jq_program);
+        return false;
+    }
     PortString_dynarr result_strings;
     PortString_dynarr_init(&result_strings);
     char* error_msg = NULL;
@@ -97,59 +94,126 @@ static int handle_process_json() {
             &result_strings,
             &error_msg);
     if (res == JQ_OK) {
-        /* fprintf(log_file, "RESULT: %s\n", PortString_dynarr_item_at(&result_strings, 0).string); */
-        
-        /* fprintf(log_file, "WRITTING OK!!\n"); */
-        int bytes_written = write_cmd((byte*)err_tags[JQ_OK], strlen(err_tags[JQ_OK]));
-        /* fprintf(log_file, "WROTE %d BYTES for the OK message\n", bytes_written); */
         size_t nr_of_result_objects = PortString_dynarr_size(&result_strings);
+        int where = 0;
+        if (write_cmd((byte*)err_tags[JQ_OK], strlen(err_tags[JQ_OK])) <= 0) {
+            goto error_on_write_out_0;
+        }
         char buf[64];
         sprintf(buf, "%lu", nr_of_result_objects);
-        write_cmd((byte*)buf, strlen(buf));
+        if (write_cmd((byte*)buf, strlen(buf)) <= 0) {
+            goto error_on_write_out_0;
+        }
 
-        for (int i = 0; i < nr_of_result_objects; i++) {
-            PortString result = PortString_dynarr_item_at(&result_strings, i);
-            write_cmd((byte*)result.string, result.size);
+        for (where = 0; where < nr_of_result_objects; where++) {
+            PortString result = PortString_dynarr_item_at(&result_strings, where);
+            if (write_cmd((byte*)result.string, result.size) <= 0) {
+                goto error_on_write_out_0;
+            }
             free(result.string);
         }
+        PortString_dynarr_destroy(&result_strings);
+        free(jq_program);
+        free(json_data);
+        return true;
+error_on_write_out_0:
+        for (where = 0; where < nr_of_result_objects; where++) {
+            PortString result = PortString_dynarr_item_at(&result_strings, where);
+            free(result.string);
+        }
+        PortString_dynarr_destroy(&result_strings);
+        free(jq_program);
+        free(json_data);
+        return false;
     } else {
-        // Error message
-        /* fprintf(log_file, "WRITTING ERROR RESPONESE!!\n"); */
-        int bytes_written = 0;
         const char* error_str = "error";
-        bytes_written = write_cmd((byte*)error_str, strlen(error_str));
-        /* fprintf(log_file, "WROTE %d %s\n", bytes_written, error_str); */
-        bytes_written = write_cmd((byte*)err_tags[res], strlen(err_tags[res]));
-        /* fprintf(log_file, "WROTE %d %s\n", bytes_written, err_tags[res]); */
-        bytes_written = write_cmd((byte*)error_msg, strlen(error_msg));
-        /* fprintf(log_file, "WROTE %d %s\n", bytes_written, error_msg); */
+        if (write_cmd((byte*)error_str, strlen(error_str)) <= 0) {
+            goto error_on_write_out_1;
+        }
+        if (write_cmd((byte*)err_tags[res], strlen(err_tags[res])) <= 0) {
+            goto error_on_write_out_1;
+        }
+        if (write_cmd((byte*)error_msg, strlen(error_msg)) <= 0) {
+            goto error_on_write_out_1;
+        } 
         free(error_msg);
+        free(jq_program);
+        free(json_data);
+        return true;
+error_on_write_out_1:
+        free(error_msg);
+        free(jq_program);
+        free(json_data);
+        return false;
     }
-    free(jq_program);
-    free(json_data);
-    return 1;
+}
+
+static bool handle_exit() {
+    erlang_jq_port_process_destroy();
+    if (record_input) {
+        fclose(record_input_file);
+    }
+    const char* exiting_str = "exiting"; 
+    if (write_cmd((byte*)exiting_str, strlen(exiting_str)) <= 0) {
+        return false;
+    } else {
+        fflush(stdout);
+        return true;
+    }
+}
+
+static bool handle_start_record_input() {
+    char* recording_file_name = (char*)read_packet();
+    if (recording_file_name == NULL) {
+        return false;
+    }
+    record_input_file = fopen(recording_file_name, "wb");
+    if (record_input_file == NULL) {
+        free(recording_file_name);
+        return false;
+    }
+    free(recording_file_name);
+    record_input = true;
+    return true;
+}
+
+static bool handle_stop_record_input() {
+    if (record_input) {
+        fclose(record_input_file);
+    }
+    record_input = false;
+    return true;
 }
 
 int main() {
     erlang_jq_port_process_init();
-    log_file = fopen("./test.txt", "wb");
-    while (1) {
-        byte * command = read_cmd();
+    while (true) {
+        byte* command = read_packet();
         if (command == NULL) {
             return 1;
         }
         if (strcmp((char*)command, "process_json") == 0) {
             free(command);
-            if(!handle_process_json()) {
+            if (!handle_process_json()) {
                 return 1;
             }
-        } else {
-            // Unknown command
-            //fprintf(stderr, "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n");
-            fclose(log_file);
+        } else if (strcmp((char*)command, "exit") == 0) {
             free(command);
-            erlang_jq_port_process_destroy();
-            return 1;
+            // Normal exit cumunicate back that we are exiting
+            return !handle_exit();
+        }
+        // Recoring input is a debuging functionality that can be used to
+        // replay a port program scenario without starting Erlang
+        else if (strcmp((char*)command, "start_record_input") == 0) {
+            free(command);
+            if (!handle_start_record_input()) {
+                return 1;
+            }
+        } else if (strcmp((char*)command, "stop_record_input") == 0) {
+            free(command);
+            if (!handle_stop_record_input()) {
+                return 1;
+            }
         }
     }
 }
