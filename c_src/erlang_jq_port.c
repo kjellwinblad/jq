@@ -8,6 +8,13 @@
 typedef unsigned char byte;
 #define PACKET_SIZE_LEN 4
 
+#define ACTIVE_LOG_PRINT 1
+#ifdef ACTIVE_LOG_PRINT
+#define LOG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
+#else
+#define LOG_PRINT(...) do{ } while ( false )
+#endif
+
 static bool record_input = false;
 static FILE* record_input_file;
 
@@ -185,35 +192,71 @@ static bool handle_stop_record_input() {
     return true;
 }
 
+static bool handle_set_filter_program_lru_cache_size() {
+    char* size_str = (char*)read_packet();
+    if (size_str == NULL) {
+        return false;
+    }
+    int new_lru_size = atoi(size_str);
+    erlang_jq_set_filter_program_lru_cache_size(new_lru_size);
+    return true;
+}
+
+static bool handle_get_filter_program_lru_cache_size() {
+    char buffer[64];
+    sprintf(buffer, "%d", erlang_jq_get_filter_program_lru_cache_size());
+    if (write_cmd((byte*)buffer, strlen(buffer)) <= 0) {
+        return false;
+    }
+    return true;
+}
+
 int main() {
     erlang_jq_port_process_init();
     while (true) {
         byte* command = read_packet();
         if (command == NULL) {
+            LOG_PRINT("Could not read command\n");
             return 1;
         }
+        LOG_PRINT("%s\n", command);
         if (strcmp((char*)command, "process_json") == 0) {
             free(command);
             if (!handle_process_json()) {
-                return 1;
+                goto error_return;
             }
         } else if (strcmp((char*)command, "exit") == 0) {
             free(command);
             // Normal exit cumunicate back that we are exiting
             return !handle_exit();
-        }
+        } else if (strcmp((char*)command, "set_filter_program_lru_cache_max_size") == 0) {
+            free(command);
+            // Normal exit cumunicate back that we are exiting
+            if (!handle_set_filter_program_lru_cache_size()) {
+                goto error_return;
+            }
+        } else if (strcmp((char*)command, "get_filter_program_lru_cache_max_size") == 0) {
+            free(command);
+            // Normal exit cumunicate back that we are exiting
+            if (!handle_get_filter_program_lru_cache_size()) {
+                goto error_return;
+            }
+        } 
         // Recoring input is a debuging functionality that can be used to
         // replay a port program scenario without starting Erlang
         else if (strcmp((char*)command, "start_record_input") == 0) {
             free(command);
             if (!handle_start_record_input()) {
-                return 1;
+                goto error_return;
             }
         } else if (strcmp((char*)command, "stop_record_input") == 0) {
             free(command);
             if (!handle_stop_record_input()) {
-                return 1;
+                goto error_return;
             }
         }
     }
+error_return:
+    LOG_PRINT("Exiting (the Erlang port may have stopped or crached\n");
+    return 1;
 }

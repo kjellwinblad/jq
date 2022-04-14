@@ -10,11 +10,11 @@ wrap_setup_cleanup(TestCases) ->
      fun cleanup/1,
      TestCases}.
 
-% change_get_cache_size_t() ->
-%     [ ?_assertMatch(ok, jq:set_filter_program_lru_cache_max_size(42)),
-%       ?_assertMatch(42, jq:get_filter_program_lru_cache_max_size())
-%     ].
-% change_get_cache_size_test_() -> wrap_setup_cleanup(change_get_cache_size_t()).
+change_get_cache_size_t() ->
+    [ ?_assertMatch(ok, jq:set_filter_program_lru_cache_max_size(42)),
+      ?_assertMatch(42, jq:get_filter_program_lru_cache_max_size())
+    ].
+change_get_cache_size_test_() -> wrap_setup_cleanup(change_get_cache_size_t()).
 
 empty_input_t_() ->
     [
@@ -222,7 +222,9 @@ cleanup(_) ->
 
 generate_port_program_input(RecordFilePath) ->
     jq_port:start(),
-    timer:sleep(50),
     jq_port:start_recording(RecordFilePath),
     ok = concurrent_queries_test(1, false, 100, 60),
+    ok = concurrent_queries_test(1, false, 1, 10),
+    ok = concurrent_queries_test(1, false, 3, 10),
+    ok = concurrent_queries_test(1, false, 0, 10),
     jq_port:stop().

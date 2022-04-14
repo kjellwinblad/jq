@@ -15,11 +15,17 @@
 parse(FilterProgram, JSONText) ->
     jq_port:jq_process_json(FilterProgram, JSONText).
 
-set_filter_program_lru_cache_max_size(_) ->
-    not_loaded(?LINE).
+% set_filter_program_lru_cache_max_size(_) ->
+%     not_loaded(?LINE).
+
+% get_filter_program_lru_cache_max_size() ->
+%     not_loaded(?LINE).
+
+set_filter_program_lru_cache_max_size(NewSize) ->
+    jq_port:set_filter_program_lru_cache_max_size(NewSize).
 
 get_filter_program_lru_cache_max_size() ->
-    not_loaded(?LINE).
+    jq_port:get_filter_program_lru_cache_max_size().
 
 init() ->
     jq_port:start(),

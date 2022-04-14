@@ -146,6 +146,13 @@ typedef struct {
 
 static module_private_data data;
 
+void erlang_jq_set_filter_program_lru_cache_size(int new_size) {
+    data.lru_cache_max_size = new_size;
+}
+
+int erlang_jq_get_filter_program_lru_cache_size() {
+    return data.lru_cache_max_size;
+}
 
 void erlang_jq_port_process_init() {
     data.version = 1;

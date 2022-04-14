@@ -64,7 +64,7 @@ int erlang_jq_port_process_json(
 
 void erlang_jq_port_process_init();
 void erlang_jq_port_process_destroy();
-
-
+void erlang_jq_set_filter_program_lru_cache_size(int new_size);
+int erlang_jq_get_filter_program_lru_cache_size();
 
 #endif
