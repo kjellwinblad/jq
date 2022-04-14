@@ -1,16 +1,17 @@
 -module(jq_port).
--export([start/1, stop/0, init/1, start_recording/1, stop_recording/0]).
+
+-export([start/0, stop/0, init/0, start_recording/1, stop_recording/0]).
 -export([jq_process_json/2]).
 
-start(ExtPrg) ->
-    spawn(?MODULE, init, [ExtPrg]).
+start() ->
+    spawn(?MODULE, init, []).
 
 stop() ->
     case lists:any(fun(X) -> X =:= complex end, erlang:registered()) of
         false -> 
             ok;
         true ->
-            complex ! stop
+            call_port(stop)
     end,
     ok.
 
@@ -33,7 +34,7 @@ call_port(Msg) ->
 	    Result
     end.
 
-init(ExtPrg) ->
+init() ->
     case lists:any(fun(X) -> X =:= complex end, erlang:registered()) of
         false -> 
             erlang:register(complex, self()),
@@ -76,13 +77,11 @@ loop(Port) ->
                     end
 	    end,
 	    loop(Port);
-	stop ->
-            erlang:display(sending_exit),
+	{call, Caller, stop} ->
             Port ! {self(), {command, <<"exit\0">>}},
-            erlang:display(waiting_for_exit),
             receive
                 {Port, {data, <<"exiting">>}} ->
-                    erlang:display(exited)
+                    Caller ! {complex, ok}
             end;
         {start_recording, FileName} ->
 	    Port ! {self(), {command, <<"start_record_input\0">>}},

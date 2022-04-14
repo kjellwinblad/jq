@@ -1,5 +1,7 @@
 -module(jq_tests).
 
+-export([generate_port_program_input/1]).
+
 -include_lib("eunit/include/eunit.hrl").
 
 wrap_setup_cleanup(TestCases) ->
@@ -184,17 +186,43 @@ concurrent_queries_t_() ->
              ok = concurrent_queries_test(NrOfScheds, false, 10, 100),
              ok = concurrent_queries_test(NrOfScheds, false, 2, 100),
              jq_port:start_recording("./test/my_test_record.bin"),
-             ok = concurrent_queries_test(NrOfScheds, false, 100, 300),
+             ok = concurrent_queries_test(NrOfScheds, false, 100, 150),
              jq_port:stop(),
              ok
      end}.
 concurrent_queries_test_() -> wrap_setup_cleanup(concurrent_queries_t_()).
 
+
+port_program_valgrind_test_() ->
+    {timeout, 30,
+     fun() ->
+             TestDir = filename:dirname(code:which(?MODULE)),
+             TestScript = filename:join(TestDir, "valgrind_port_program.sh"),
+             Result = os:cmd(TestScript),
+             case re:run(Result, "SUCCESS|SKIP") =/= nomatch of
+                 true -> ok;
+                 false ->
+                     ErrorMsg = io_lib:format("\nMemory Error. See: ~s",
+                                              [filename:join(TestDir, "port_program_stderr.txt\n")]),
+                     erlang:display_string(erlang:binary_to_list(erlang:iolist_to_binary(ErrorMsg))),
+                     ?assertEqual(success, false)
+             end
+     end}.
+
 setup() ->
-    jq_port:start(""),
+    jq_port:start(),
     ok.
 
 cleanup(_) ->
     jq_port:stop(),
     true = code:delete(jq),
     true = code:soft_purge(jq).
+
+
+
+generate_port_program_input(RecordFilePath) ->
+    jq_port:start(),
+    timer:sleep(50),
+    jq_port:start_recording(RecordFilePath),
+    ok = concurrent_queries_test(1, false, 100, 60),
+    jq_port:stop().

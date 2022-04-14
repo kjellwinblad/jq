@@ -22,7 +22,7 @@ get_filter_program_lru_cache_max_size() ->
     not_loaded(?LINE).
 
 init() ->
-    jq_port:start(""),
+    jq_port:start(),
     ok.
     % LibNameAndVersion = ?LIBNAME ++ erlang:integer_to_list(?VERSION),
     % SoName = case code:priv_dir(?APPNAME) of
