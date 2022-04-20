@@ -18,36 +18,36 @@ change_get_cache_size_test_() -> wrap_setup_cleanup(change_get_cache_size_t()).
 
 empty_input_t_() ->
     [
-     ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"">>))
-    , ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<" ">>))
-    , ?_assertMatch({ok,[<<"{}">>]}, jq:parse(<<"">>, <<"{}">>))
-    , ?_assertMatch({ok,[<<"{}">>]}, jq:parse(<<" ">>, <<"{}">>))
+     ?_assertMatch({error, {jq_err_parse, _}}, jq:process_json(<<".">>, <<"">>))
+    , ?_assertMatch({error, {jq_err_parse, _}}, jq:process_json(<<".">>, <<" ">>))
+    , ?_assertMatch({ok,[<<"{}">>]}, jq:process_json(<<"">>, <<"{}">>))
+    , ?_assertMatch({ok,[<<"{}">>]}, jq:process_json(<<" ">>, <<"{}">>))
     ].
 empty_input_test_() -> wrap_setup_cleanup(empty_input_t_()).
 
 parse_error_t_() ->
-    [ ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"{\"b\": }">>))
-    , ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"{\"b\"- 2}">>))
-    , ?_assertMatch({error, {jq_err_parse, _}}, jq:parse(<<".">>, <<"{\"b\"- 2}">>))
+    [ ?_assertMatch({error, {jq_err_parse, _}}, jq:process_json(<<".">>, <<"{\"b\": }">>))
+    , ?_assertMatch({error, {jq_err_parse, _}}, jq:process_json(<<".">>, <<"{\"b\"- 2}">>))
+    , ?_assertMatch({error, {jq_err_parse, _}}, jq:process_json(<<".">>, <<"{\"b\"- 2}">>))
     ].
 parse_error_test_() -> wrap_setup_cleanup(parse_error_t_()).
 
 process_error_t_() ->
-    [ ?_assertMatch({error, {jq_err_process, _}}, jq:parse(<<".[1]">>, <<"{}">>))
-    , ?_assertMatch({error, {jq_err_process, _}}, jq:parse(<<".a">>, <<"[1,2]">>))
+    [ ?_assertMatch({error, {jq_err_process, _}}, jq:process_json(<<".[1]">>, <<"{}">>))
+    , ?_assertMatch({error, {jq_err_process, _}}, jq:process_json(<<".a">>, <<"[1,2]">>))
     ].
 process_error_test_() -> wrap_setup_cleanup(process_error_t_()).
 
 object_identifier_index_t_() ->
-    [ ?_assertEqual({ok,[<<"{\"b\":2}">>]}, jq:parse(<<".">>, <<"{\"b\": 2}">>))
-    , ?_assertEqual({ok,[<<"{\"b\":2}">>]}, jq:parse(<<".">>, <<"{\"b\":\n 2}">>))
-    , ?_assertEqual({ok,[<<"2">>]}, jq:parse(<<".b">>, <<"{\"b\": 2}">>))
-    , ?_assertEqual({ok,[<<"2">>]}, jq:parse(<<".a.b">>, <<"{\"a\":{\"b\": 2}}">>))
+    [ ?_assertEqual({ok,[<<"{\"b\":2}">>]}, jq:process_json(<<".">>, <<"{\"b\": 2}">>))
+    , ?_assertEqual({ok,[<<"{\"b\":2}">>]}, jq:process_json(<<".">>, <<"{\"b\":\n 2}">>))
+    , ?_assertEqual({ok,[<<"2">>]}, jq:process_json(<<".b">>, <<"{\"b\": 2}">>))
+    , ?_assertEqual({ok,[<<"2">>]}, jq:process_json(<<".a.b">>, <<"{\"a\":{\"b\": 2}}">>))
     ].
 object_identifier_index_test_() -> wrap_setup_cleanup(object_identifier_index_t_()).
 
 array_index_t_() ->
-    [ ?_assertEqual({ok,[<<"1">>,<<"2">>,<<"3">>]}, jq:parse(<<".b|.[]">>, <<"{\"b\": [1,2,3]}">>))
+    [ ?_assertEqual({ok,[<<"1">>,<<"2">>,<<"3">>]}, jq:process_json(<<".b|.[]">>, <<"{\"b\": [1,2,3]}">>))
     ].
 array_index_test_() -> wrap_setup_cleanup(array_index_t_()).
 
@@ -56,7 +56,7 @@ test_prog(ExpectedResStr, FilterProgStr, InputStr) ->
     FilterProgBin = erlang:list_to_binary(FilterProgStr),
     InputBin = erlang:list_to_binary(InputStr),
     ?_assertEqual({ok, [ExpectedResBin]},
-                  jq:parse(
+                  jq:process_json(
                     FilterProgBin,
                     InputBin)).
 
@@ -178,7 +178,7 @@ concurrent_queries_t_() ->
              NrOfScheds = erlang:system_info(schedulers),
              Qubes = qubes(NrOfScheds),
              erlang:display_nl(),
-             [(ok = concurrent_queries_test(NrOfTestProcess, true, 500, 500))
+             [(ok = concurrent_queries_test(NrOfTestProcess, true, 500, 5000))
               || NrOfTestProcess <- Qubes],
              ok = concurrent_queries_test(NrOfScheds, false, 0, 100),
              ok = concurrent_queries_test(NrOfScheds, false, 1, 100),
@@ -187,7 +187,6 @@ concurrent_queries_t_() ->
              ok = concurrent_queries_test(NrOfScheds, false, 2, 100),
              jq_port:start_recording("./test/my_test_record.bin"),
              ok = concurrent_queries_test(NrOfScheds, false, 100, 150),
-             jq_port:stop(),
              ok
      end}.
 concurrent_queries_test_() -> wrap_setup_cleanup(concurrent_queries_t_()).
@@ -210,21 +209,23 @@ port_program_valgrind_test_() ->
      end}.
 
 setup() ->
-    jq_port:start(),
     ok.
 
 cleanup(_) ->
-    jq_port:stop(),
+    application:stop(jq),
     true = code:delete(jq),
     true = code:soft_purge(jq).
 
 
 
 generate_port_program_input(RecordFilePath) ->
-    jq_port:start(),
+    Schedulers = erlang:system_info(schedulers_online),
+    erlang:system_flag(schedulers_online, 1),
     jq_port:start_recording(RecordFilePath),
     ok = concurrent_queries_test(1, false, 100, 60),
     ok = concurrent_queries_test(1, false, 1, 10),
     ok = concurrent_queries_test(1, false, 3, 10),
     ok = concurrent_queries_test(1, false, 0, 10),
-    jq_port:stop().
+    application:stop(jq),
+    erlang:system_flag(schedulers_online, Schedulers),
+    ok.

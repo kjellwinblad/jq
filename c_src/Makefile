@@ -4,10 +4,11 @@ CURDIR := $(shell pwd)
 BASEDIR := $(abspath $(CURDIR)/..)
 VERSION := $(shell ./get_version.sh $(BASEDIR)) 
 VERSION := $(strip $(VERSION))
-JQERLMODSRC := $(BASEDIR)/src/jq.erl
+JQERLMODSRC := $(BASEDIR)/src/jq_nif.erl
 
 PROJECT ?= $(notdir $(BASEDIR))
 PROJECT := $(strip $(PROJECT))
+NIF_MODULE := jq_nif
 JQURL := https://github.com/emqx/jqc.git
 JQSRC_DIR := $(CURDIR)/libs/jqc
 JQSRC := $(JQSRC_DIR)/src/jv.c
@@ -46,7 +47,7 @@ ERL_INTERFACE_LIB_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~t
 
 PRIV_DIR = $(CURDIR)/../priv
 C_SRC_DIR = $(CURDIR)
-C_SRC_OUTPUT ?= $(PRIV_DIR)/$(PROJECT)$(VERSION).so
+C_SRC_OUTPUT ?= $(PRIV_DIR)/$(NIF_MODULE)$(VERSION).so
 
 # System type and C compiler/flags.
 

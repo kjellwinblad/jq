@@ -8,7 +8,7 @@
 typedef unsigned char byte;
 #define PACKET_SIZE_LEN 4
 
-#define ACTIVE_LOG_PRINT 1
+//#define ACTIVE_LOG_PRINT
 #ifdef ACTIVE_LOG_PRINT
 #define LOG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
 #else
@@ -179,6 +179,12 @@ static bool handle_start_record_input() {
         free(recording_file_name);
         return false;
     }
+    const char* ok_str = "ok";
+    if (write_cmd((byte*)ok_str, strlen(ok_str)) <= 0) {
+        free(recording_file_name);
+        fclose(record_input_file);
+        return false;
+    }
     free(recording_file_name);
     record_input = true;
     return true;
@@ -187,6 +193,10 @@ static bool handle_start_record_input() {
 static bool handle_stop_record_input() {
     if (record_input) {
         fclose(record_input_file);
+    }
+    const char* ok_str = "ok";
+    if (write_cmd((byte*)ok_str, strlen(ok_str)) <= 0) {
+        return false;
     }
     record_input = false;
     return true;
@@ -199,6 +209,10 @@ static bool handle_set_filter_program_lru_cache_size() {
     }
     int new_lru_size = atoi(size_str);
     erlang_jq_set_filter_program_lru_cache_size(new_lru_size);
+    const char* ok_str = "ok";
+    if (write_cmd((byte*)ok_str, strlen(ok_str)) <= 0) {
+        return false;
+    }
     return true;
 }
 
@@ -210,6 +224,15 @@ static bool handle_get_filter_program_lru_cache_size() {
     }
     return true;
 }
+
+static bool handle_ping() {
+    const char* response = "pong";
+    if (write_cmd((byte*)response, strlen(response)) <= 0) {
+        return false;
+    }
+    return true;
+}
+
 
 int main() {
     erlang_jq_port_process_init();
@@ -223,6 +246,12 @@ int main() {
         if (strcmp((char*)command, "process_json") == 0) {
             free(command);
             if (!handle_process_json()) {
+                goto error_return;
+            }
+       } else if (strcmp((char*)command, "ping") == 0) {
+            free(command);
+            // Used to check if the port program is up and running without any problems
+            if (!handle_ping()) {
                 goto error_return;
             }
         } else if (strcmp((char*)command, "exit") == 0) {
