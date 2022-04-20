@@ -24,6 +24,8 @@
 -export([
            set_filter_program_lru_cache_max_size/1
          , get_filter_program_lru_cache_max_size/0
+         , nr_of_jq_port_servers/0
+         , set_nr_of_jq_port_servers/1
         ]).
 
 %% Debug functionality
@@ -32,6 +34,8 @@
            start_recording/1
          , stop_recording/0
         ]).
+
+-define(APPNAME, jq).
 
 start_link(Id) ->
     gen_server:start_link(jq_port, Id, []).
@@ -54,11 +58,11 @@ do_op_ensure_started(Op) ->
 start_recording(FileName) ->
     Op =
     fun() -> 
-            Expect = [ok || _ <- lists:seq(0, jq_port_sup:nr_of_jq_port_servers() - 1)],
+            Expect = [ok || _ <- lists:seq(0, jq_port:nr_of_jq_port_servers() - 1)],
             Expect = [gen_server:call(port_server_by_id(Id),
                                       {start_recording,
                                        erlang:iolist_to_binary([FileName, "\0"])}) ||
-                      Id <- lists:seq(0, jq_port_sup:nr_of_jq_port_servers() - 1)],
+                      Id <- lists:seq(0, jq_port:nr_of_jq_port_servers() - 1)],
             ok
     end,
     do_op_ensure_started(Op).
@@ -67,10 +71,10 @@ start_recording(FileName) ->
 stop_recording() ->
     Op =
     fun() ->
-            Expect = [ok || _ <- lists:seq(0, jq_port_sup:nr_of_jq_port_servers() - 1)],
+            Expect = [ok || _ <- lists:seq(0, jq_port:nr_of_jq_port_servers() - 1)],
             Expect = [gen_server:call(port_server_by_id(Id),
                                       stop_recording) ||
-                      Id <- lists:seq(0, jq_port_sup:nr_of_jq_port_servers() - 1)],
+                      Id <- lists:seq(0, jq_port:nr_of_jq_port_servers() - 1)],
             ok
     end,
     do_op_ensure_started(Op).
@@ -106,7 +110,7 @@ port_server_by_id(Id) ->
 
 port_server() ->
     port_server_by_id(erlang:phash2(self(),
-                                    jq_port_sup:nr_of_jq_port_servers())).
+                                    jq_port:nr_of_jq_port_servers())).
 
 add_to_lookup_table(Id) ->
     persistent_term:put({?MODULE, Id}, self()).
@@ -125,8 +129,23 @@ init(Id) ->
     add_to_lookup_table(Id),
     {ok, State}.
 
+port_program_path() ->
+    PortProgramName = "erlang_jq_port",
+    Path = case code:priv_dir(?APPNAME) of
+        {error, bad_name} ->
+            case filelib:is_dir(filename:join(["..", priv])) of
+                true ->
+                    filename:join(["..", priv, PortProgramName]);
+                _ ->
+                    filename:join([priv, PortProgramName])
+            end;
+        Dir ->
+            filename:join(Dir, PortProgramName)
+    end,
+    Path.
+
 start_port_program() ->
-    Port = erlang:open_port({spawn, "./priv/erlang_jq_port"}, [{packet, 4}, binary]),
+    Port = erlang:open_port({spawn, port_program_path()}, [{packet, 4}, binary]),
     true = is_port_alive(Port),
     Port.
 
@@ -156,7 +175,8 @@ is_port_alive(Port) ->
     end.
 
 kill_port(Port) ->
-    TimeToWaitForExitingConfirmation = 100,
+    TimeToWaitForExitingConfirmation =
+        application:get_env(jq, jq_port_ms_to_wait_for_exit_confirmation, 100),
     send_msg_to_port(Port, <<"exit\0">>),
     receive
         {Port, {data, <<"exiting">>}} -> 
@@ -241,7 +261,8 @@ handle_call({jq_process_json, FilterProgram, JSONText}, _From, State) ->
             misbehaving_port_program(State, ErrorClass, Reason)
     end;
 handle_call(stop, _From, State) ->
-    TimeToWaitForExitingConfirmation = 3000,
+    TimeToWaitForExitingConfirmation =
+        application:get_env(jq, jq_port_ms_to_wait_for_exit_confirmation, 100),
     Port = state_port(State),
     send_msg_to_port(Port, <<"exit\0">>), 
     receive
@@ -327,3 +348,14 @@ code_change(_OldVsn, State, _Extra) ->
     NewPort = start_port_program(),
     NewState = State#{port => NewPort},
     {ok, NewState}.
+
+nr_of_jq_port_servers() ->
+    persistent_term:get(jq_nr_of_jq_port_servers, erlang:system_info(schedulers)).
+
+set_nr_of_jq_port_servers(NrOfJqPortServers)
+  when is_integer(NrOfJqPortServers), NrOfJqPortServers > 0, NrOfJqPortServers =< 8192 ->
+    case lists:any(fun({jq,_,_}) -> true; (_) -> false end, application:which_applications()) of
+        true -> logger:warning("Changing the number of jq port servers while the jq application is running may not be safe");
+        false -> ok
+    end,
+    persistent_term:put(jq_nr_of_jq_port_servers, NrOfJqPortServers).

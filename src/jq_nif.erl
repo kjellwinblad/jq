@@ -24,7 +24,6 @@ get_filter_program_lru_cache_max_size() ->
 
 init() ->
     LibNameAndVersion = ?LIBNAME ++ erlang:integer_to_list(?VERSION),
-    erlang:display(load_nigaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1),
     SoName = case code:priv_dir(?APPNAME) of
         {error, bad_name} ->
             case filelib:is_dir(filename:join(["..", priv])) of
@@ -44,7 +43,6 @@ init() ->
     JQNifConfig =
         #{filter_program_lru_cache_max_size => CacheMaxSize,
           version => ?VERSION},
-        erlang:display(load_nigaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
     erlang:load_nif(SoName, JQNifConfig).
 
 not_loaded(Line) ->

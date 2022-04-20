@@ -14,8 +14,6 @@
 
 -define(SERVER, ?MODULE).
 
--export([nr_of_jq_port_servers/0]).
-
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
@@ -32,7 +30,7 @@ init([]) ->
     SupFlags = #{strategy => one_for_all,
                  intensity => 0,
                  period => 1},
-    ChildSpecs = [child_spec(Id) || Id <- lists:seq(0, nr_of_jq_port_servers() - 1)],
+    ChildSpecs = [child_spec(Id) || Id <- lists:seq(0, jq_port:nr_of_jq_port_servers() - 1)],
     {ok, {SupFlags, ChildSpecs}}.
 
 %% internal functions
@@ -41,5 +39,3 @@ child_spec(Id) ->
     #{id => Id,
       start => {jq_port, start_link, [Id]}}.
 
-nr_of_jq_port_servers() ->
-    erlang:system_info(schedulers).
