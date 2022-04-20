@@ -20,7 +20,7 @@ enum {
     JQ_ERROR_PROCESS   =  6
 };
 
-static char* err_tags[] = {
+char* err_tags[] = {
     "ok",               // 0
     "jq_err_unknown",   // 1
     "jq_err_system",    // 2

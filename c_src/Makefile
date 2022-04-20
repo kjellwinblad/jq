@@ -18,7 +18,7 @@ RDSSRC := $(RDSSRC_DIR)/Makefile
 LIBJQ_DIR ?= $(JQSRC_DIR)/.libs
 LIBJQ_PREFIX := /usr/local
 EXT_LIBS := $(CURDIR)/ext_libs
-
+ERL_PORT_PROGRAM := $(BASEDIR)/priv/erlang_jq_port
 ifeq ($(UNAME_SYS), Darwin)
 	LIBJQ := libjq.1.dylib
 	LIBONIG := libonig.4.dylib
@@ -113,13 +113,13 @@ else
 $(C_SRC_OUTPUT): build_erl_jq
 endif
 
-build_erl_jq: $(OBJECTS) build_erl_port_jq
+build_erl_jq: $(OBJECTS) $(ERL_PORT_PROGRAM)
 	@mkdir -p $(BASEDIR)/priv/
 	$(link_verbose) $(CC) $(OBJECTS) $(LDFLAGS) $(LDLIBS) -o $(C_SRC_OUTPUT)
 
-build_erl_port_jq: $(PORT_OBJECTS)
+$(ERL_PORT_PROGRAM): $(PORT_OBJECTS)
 	@mkdir -p $(BASEDIR)/priv/
-	gcc $(PORT_OBJECTS) -lm -L $(EXT_LIBS) -l:libjq.a -l:libonig.a -o $(BASEDIR)/priv/erlang_jq_port
+	$(CC) $(PORT_OBJECTS) -lm -L $(EXT_LIBS) -l:libjq.a -l:libonig.a -o $(ERL_PORT_PROGRAM)
 
 %.o: %.c $(LIBJQ_NAME) $(JQERLMODSRC) $(RDSSRC)
 	$(COMPILE_C) $(OUTPUT_OPTION) $<

@@ -7,56 +7,6 @@
 
 #include <string.h>
 #include <stdbool.h>
-#include <setjmp.h>
-
-#if __STDC_NO_THREADS__ == 0
-
-#include <threads.h>
-
-#elif JQ_NO_PTHREAD == 0
-
-#include <pthread.h>
-
-#define tss_t pthread_key_t
-#define thrd_error 1
-#define thrd_success 0
-#define tss_create(key, dtor) (pthread_key_create(key, dtor) != 0 ? thrd_error : thrd_success)
-#define tss_delete(key) pthread_key_delete(key)
-#define tss_get(key) pthread_getspecific(key)
-#define tss_set(key, data) (pthread_setspecific(key, data) != 0 ? thrd_error : thrd_success)
-
-#else
-// As a last resort we fall back to using the NIF library's thread local
-// variables as enif_tsd_key_destroy has the following requirement 
-// (quote from https://www.erlang.org/doc/man/erl_driver.html#erl_drv_tsd_set):
-
-// "All thread-specific data using this key in all threads must be cleared (see
-// erl_drv_tsd_set) before the call to erl_drv_tsd_key_destroy."
-
-// This makes it very tricky to delete keys when the the jq module is unloaded
-
-#define tss_t ErlNifTSDKey
-#define thrd_error 1
-#define thrd_success 0
-#define tss_create(key, dtor) (enif_tsd_key_create("jq_state_cache", key) != 0 ? thrd_error : thrd_success)
-#define tss_get(key) enif_tsd_get(key)
-#define tss_set(key, data) enif_tsd_set(key, data)
-// Do nothing on delete
-#define tss_delete(key) 
-
-#endif
-
-static _Thread_local jmp_buf nomem_handling_jmp_buf;
-
-static void* jq_enif_alloc(size_t size) {
-    void * data = malloc(size);
-    if (data == NULL) {
-        fprintf(stderr, "ERROR: enif_alloc returned NULL (out of memory?)\n");
-        longjmp(nomem_handling_jmp_buf, 1);
-    }
-    return data;
-}
-
 
 
 // jq_state cache entry (hash and string is the key and state is the value)
@@ -117,30 +67,15 @@ static bool jqstate_cache_entry_shall_evict(
 DECLARE_LRUCACHE_DS(
         JQStateCacheEntry,
         static,
-        jq_enif_alloc,
+        malloc,
         free,
         jqstate_cache_entry_eq,
         jqstate_cache_entry_hash,
         jqstate_cache_entry_destroy,
         jqstate_cache_entry_shall_evict)
 
-// Data that is private to this version of the module
 typedef struct {
-    // The following two fields always have to be placed first
-    // in any new version of this library so that they can
-    // be found when doing hot upgrading.
-    
-    // The following field is set to the version which is given
-    // when the library is loaded
-    int version;
-    // The following field should be increased by one when the
-    // library is hot upgraded (this is used to set the lock name
-    // to an unique name)
-    int nr_of_loads_before;
-
-    // The maximum size for the thread local jq_state caches
     int lru_cache_max_size;
-    // thread local storage key used to find the jq_state cache
     struct JQStateCacheEntry_lru cache;
 } module_private_data;
 
@@ -155,8 +90,6 @@ int erlang_jq_get_filter_program_lru_cache_size() {
 }
 
 void erlang_jq_port_process_init() {
-    data.version = 1;
-    data.nr_of_loads_before = 0;
     data.lru_cache_max_size = 500;
     JQStateCacheEntry_lru_init(&data.cache);
 }
