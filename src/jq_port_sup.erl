@@ -1,6 +1,6 @@
 
 %%%-------------------------------------------------------------------
-%% @doc 
+%% @doc Supervisor for jq port servers
 %% @end
 %%%-------------------------------------------------------------------
 
@@ -17,19 +17,10 @@
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-%% sup_flags() = #{strategy => strategy(),         % optional
-%%                 intensity => non_neg_integer(), % optional
-%%                 period => pos_integer()}        % optional
-%% child_spec() = #{id => child_id(),       % mandatory
-%%                  start => mfargs(),      % mandatory
-%%                  restart => restart(),   % optional
-%%                  shutdown => shutdown(), % optional
-%%                  type => worker(),       % optional
-%%                  modules => modules()}   % optional
 init([]) ->
-    SupFlags = #{strategy => one_for_all,
-                 intensity => 0,
-                 period => 1},
+    SupFlags = #{strategy => one_for_one,
+                 intensity => 1, %% Allowed restarts within period 
+                 period => 20}, %% Seconds
     ChildSpecs = [child_spec(Id) || Id <- lists:seq(0, jq_port:nr_of_jq_port_servers() - 1)],
     {ok, {SupFlags, ChildSpecs}}.
 
@@ -37,5 +28,9 @@ init([]) ->
 
 child_spec(Id) ->
     #{id => Id,
-      start => {jq_port, start_link, [Id]}}.
+      start => {jq_port, start_link, [Id]},
+      restart => transient,
+      shutdown => 5000,
+      modules => [jq_port] 
+     }.
 

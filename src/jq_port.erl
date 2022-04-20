@@ -1,3 +1,11 @@
+
+%%%-------------------------------------------------------------------
+%% @doc gen_server callback module implementing a server controlling a jq port
+%% program
+%% @end
+%%%-------------------------------------------------------------------
+
+
 -module(jq_port).
 
 -behavior(gen_server).
@@ -124,7 +132,8 @@ init(Id) ->
     State = #{
       port => Port,
       id => Id,
-      processed_json_calls => 0
+      processed_json_calls => 0,
+      restart_period => application:get_env(jq, jq_port_restart_period, 1000000)
      },
     add_to_lookup_table(Id),
     {ok, State}.
@@ -164,8 +173,14 @@ state_port(State) ->
 state_id(State) ->
     maps:get(id, State).
 
+state_restart_period(State) ->
+    maps:get(restart_period, State).
+
+state_processed_json_calls(State) ->
+    maps:get(processed_json_calls, State).
+
 is_port_alive(Port) ->
-    PortAliveTimeout = 30 * 1000, %% 30 seconds
+    PortAliveTimeout = application:get_env(jq, jq_port_is_alive_wait_timeout, 5 * 1000), %% 5 seconds
     send_msg_to_port(Port, <<"ping\0">>), 
     case receive_msg_from_port(Port, PortAliveTimeout) of
         <<"pong">> ->
@@ -177,7 +192,7 @@ is_port_alive(Port) ->
 kill_port(Port) ->
     TimeToWaitForExitingConfirmation =
         application:get_env(jq, jq_port_ms_to_wait_for_exit_confirmation, 100),
-    send_msg_to_port(Port, <<"exit\0">>),
+    Port ! {self(), {command, <<"exit\0">>}},
     receive
         {Port, {data, <<"exiting">>}} -> 
             ok
@@ -189,7 +204,7 @@ kill_port(Port) ->
     ok.
 
 send_msg_to_port(Port, Msg) ->
-    Port ! {self(), {command, Msg}}.
+    erlang:port_command(Port, Msg).
 
 receive_msg_from_port(Port) ->
     receive
@@ -233,12 +248,14 @@ receive_process_json_result(Port) ->
             {ok, receive_result_blobs(Port, NrOfItems, [])};
         <<"error">> ->
             [ErrorType, ErrorMsg] = receive_result_blobs(Port, 2, []),
-            {error, {erlang:binary_to_atom(ErrorType), ErrorMsg}}
+            {error, {erlang:binary_to_atom(ErrorType), ErrorMsg}};
+        Unexpected ->
+            error({unexpected_response_from_port, Unexpected})
     end.
 
 new_state_after_process_json(State) ->
-    RestartPeriod = 1000000,
-    NrOfCalls = maps:get(processed_json_calls, State),
+    RestartPeriod = state_restart_period(State),
+    NrOfCalls = state_processed_json_calls(State),
     case (NrOfCalls+1) rem RestartPeriod of
         0 -> 
             OldPort = state_port(State),
@@ -257,22 +274,12 @@ handle_call({jq_process_json, FilterProgram, JSONText}, _From, State) ->
         send_msg_to_port(Port, [JSONText, 0]), 
         {reply, receive_process_json_result(Port), new_state_after_process_json(State)}
     catch
-        ErrorClass:Reason ->
+        ErrorClass:Reason:Stack ->
             misbehaving_port_program(State, ErrorClass, Reason)
     end;
 handle_call(stop, _From, State) ->
-    TimeToWaitForExitingConfirmation =
-        application:get_env(jq, jq_port_ms_to_wait_for_exit_confirmation, 100),
-    Port = state_port(State),
-    send_msg_to_port(Port, <<"exit\0">>), 
-    receive
-        {Port, {data, <<"exiting">>}} -> 
-            {stop, normal, ok, State}
-    after TimeToWaitForExitingConfirmation ->
-              %% Make sure the port goes down
-              kill_port(Port),
-              {stop, normal, ok, State}
-    end;
+    kill_port(state_port(State)),
+    {stop, normal, ok, State};
 handle_call(get_filter_program_lru_cache_max_size, _From, State) ->
     Port = state_port(State),
     try

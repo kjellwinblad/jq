@@ -1,3 +1,10 @@
+
+%%%-------------------------------------------------------------------
+%% @doc This module provides the public API for the Erlang JSON library
+%% @end
+%%%-------------------------------------------------------------------
+
+
 -module(jq).
 
 -export([
@@ -69,8 +76,8 @@ set_filter_program_lru_cache_max_size(NewSize)
     Mod:set_filter_program_lru_cache_max_size(NewSize).
 
 init() ->
-    % %% Load the jq application here since it needs to be loaded so
-    % %% we can read its properties
+    %% Load the jq application here since it needs to be loaded so
+    %% we can read its properties
     application:load(jq),
     JQImplementation =
         application:get_env(jq, jq_implementation_module, jq_port),
