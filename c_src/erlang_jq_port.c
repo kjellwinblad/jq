@@ -18,6 +18,26 @@ typedef unsigned char byte;
 static bool record_input = false;
 static FILE* record_input_file;
 
+enum {
+    JQ_OK              =  0,
+    JQ_ERROR_UNKNOWN   =  1,
+    JQ_ERROR_SYSTEM    =  2,
+    JQ_ERROR_BADARG    =  3,
+    JQ_ERROR_COMPILE   =  4,
+    JQ_ERROR_PARSE     =  5,
+    JQ_ERROR_PROCESS   =  6
+};
+
+static char* err_tags[] = {
+    "ok",               // 0
+    "jq_err_unknown",   // 1
+    "jq_err_system",    // 2
+    "jq_err_badarg",    // 3
+    "jq_err_compile",   // 4
+    "jq_err_parse",     // 5
+    "jq_err_process"    // 6
+};
+
 static ssize_t read_exact(byte *buf, size_t len) {
     ssize_t i;
     size_t got = 0;
